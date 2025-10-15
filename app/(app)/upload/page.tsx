@@ -26,11 +26,14 @@ const detailsSchema = z.object({
 
 type DetailsValues = z.infer<typeof detailsSchema>
 
+type Stage = "idle" | "processing" | "predicting" | "saving"
+
 export default function UploadPage() {
   const { addStudy } = useData()
   const { toast } = useToast()
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [stage, setStage] = useState<Stage>("idle")
 
   const form = useForm<DetailsValues>({
     resolver: zodResolver(detailsSchema),
@@ -49,7 +52,6 @@ export default function UploadPage() {
   function handleFilesSelected(files: File[]) {
     const f = files[0]
     setFile(f)
-    // show preview only for images; otherwise use placeholder
     if (f && f.type.startsWith("image/")) {
       const url = URL.createObjectURL(f)
       setPreviewUrl(url)
@@ -69,31 +71,61 @@ export default function UploadPage() {
     })
   }
 
+  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
   async function onSubmit(values: DetailsValues) {
     if (!file) {
       toast({ title: "No file", description: "Please add a file first." })
       return
     }
-    const dataUrl = await fileToDataUrl(file)
-    addStudy({
-      fileName: file.name,
-      patientName: values.patientName,
-      status: "processed",
-      size: file.size,
-      imageDataUrl: dataUrl,
-      patientId: values.patientId,
-      age: values.age,
-      sex: values.sex,
-      modality: values.modality,
-      notes: values.notes,
-      studyDate: values.studyDate,
-    })
-    toast({ title: "Study saved", description: "Draft report generated. View it in Reports." })
-    // reset
-    form.reset()
-    setFile(null)
-    setPreviewUrl(null)
+
+    try {
+      setStage("processing")
+      toast({ title: "Image processing…", description: "Preprocessing the uploaded study." })
+      await delay(5000)
+
+      setStage("predicting")
+      toast({ title: "Predicting…", description: "Running model inference." })
+      await delay(5000)
+
+      setStage("saving")
+      const dataUrl = await fileToDataUrl(file)
+      addStudy({
+        fileName: file.name,
+        patientName: values.patientName,
+        status: "processed",
+        size: file.size,
+        imageDataUrl: dataUrl,
+        patientId: values.patientId,
+        age: values.age,
+        sex: values.sex,
+        modality: values.modality,
+        notes: values.notes,
+        studyDate: values.studyDate,
+      })
+
+      toast({ title: "Study saved", description: "Draft report generated. View it in Reports." })
+
+      // reset
+      form.reset()
+      setFile(null)
+      setPreviewUrl(null)
+    } catch (e) {
+      console.error(e)
+      toast({ title: "Something went wrong", description: "Could not save the study." })
+    } finally {
+      setStage("idle")
+    }
   }
+
+  const stageLabel: Record<Stage, string> = {
+    idle: "",
+    processing: "Image processing… (~5s)",
+    predicting: "Predicting… (~5s)",
+    saving: "Saving…",
+  }
+
+  const isBusy = stage !== "idle"
 
   return (
     <div className="max-w-3xl">
@@ -115,6 +147,13 @@ export default function UploadPage() {
             </div>
           )}
 
+          {/* Simple status banner */}
+          {isBusy && (
+            <div className="rounded-md border p-3 text-sm bg-muted/40">
+              <span className="font-medium">{stageLabel[stage]}</span>
+            </div>
+          )}
+
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-4">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -125,7 +164,7 @@ export default function UploadPage() {
                     <FormItem>
                       <FormLabel>Patient name</FormLabel>
                       <FormControl>
-                        <Input placeholder="Drake M." {...field} />
+                        <Input placeholder="Drake M." {...field} disabled={isBusy} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -138,7 +177,7 @@ export default function UploadPage() {
                     <FormItem>
                       <FormLabel>Patient ID</FormLabel>
                       <FormControl>
-                        <Input placeholder="PID-12345" {...field} />
+                        <Input placeholder="PID-12345" {...field} disabled={isBusy} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -161,6 +200,7 @@ export default function UploadPage() {
                           value={field.value?.toString() ?? ""}
                           onChange={(e) => field.onChange(e.target.value)}
                           inputMode="numeric"
+                          disabled={isBusy}
                         />
                       </FormControl>
                       <FormMessage />
@@ -173,7 +213,7 @@ export default function UploadPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Sex</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isBusy}>
                         <FormControl>
                           <SelectTrigger aria-label="Sex">
                             <SelectValue placeholder="Select" />
@@ -196,7 +236,7 @@ export default function UploadPage() {
                     <FormItem>
                       <FormLabel>Modality</FormLabel>
                       <FormControl>
-                        <Input placeholder="X-ray" {...field} />
+                        <Input placeholder="X-ray" {...field} disabled={isBusy} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -212,7 +252,12 @@ export default function UploadPage() {
                     <FormItem>
                       <FormLabel>Study date</FormLabel>
                       <FormControl>
-                        <Input type="date" value={field.value ?? ""} onChange={(e) => field.onChange(e.target.value)} />
+                        <Input
+                          type="date"
+                          value={field.value ?? ""}
+                          onChange={(e) => field.onChange(e.target.value)}
+                          disabled={isBusy}
+                        />
                       </FormControl>
                       <FormDescription>Optional</FormDescription>
                       <FormMessage />
@@ -228,7 +273,7 @@ export default function UploadPage() {
                   <FormItem>
                     <FormLabel>Notes</FormLabel>
                     <FormControl>
-                      <Textarea placeholder="Clinical notes / symptoms..." {...field} />
+                      <Textarea placeholder="Clinical notes / symptoms..." {...field} disabled={isBusy} />
                     </FormControl>
                     <FormDescription>Optional</FormDescription>
                     <FormMessage />
@@ -237,10 +282,15 @@ export default function UploadPage() {
               />
 
               <div className="flex items-center gap-3">
-                <Button type="submit" disabled={!file}>
-                  Save & Generate Draft
+                <Button type="submit" disabled={!file || isBusy}>
+                  {stage === "idle" && "Process & Save"}
+                  {stage === "processing" && "Image processing…"}
+                  {stage === "predicting" && "Predicting…"}
+                  {stage === "saving" && "Saving…"}
                 </Button>
-                {!file && <span className="text-sm text-muted-foreground">Add a file to enable saving</span>}
+                {!file && !isBusy && (
+                  <span className="text-sm text-muted-foreground">Add a file to enable saving</span>
+                )}
               </div>
             </form>
           </Form>
